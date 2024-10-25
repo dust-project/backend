@@ -1,6 +1,8 @@
 package pdf
 
 import (
+	"bytes"
+	"dust/pkg/ondemand"
 	"io"
 	"os"
 	"testing"
@@ -29,7 +31,8 @@ func TestReadPdf(t *testing.T) {
 
 	}
 
-	tee := io.TeeReader(reader, os.Stdout)
+	buf := &bytes.Buffer{}
+	tee := io.TeeReader(reader, buf)
 
 	buffer := make([]byte, 1024)
 	for {
@@ -43,4 +46,19 @@ func TestReadPdf(t *testing.T) {
 
 	}
 
+	ctn, err := io.ReadAll(buf)
+	if err != nil {
+
+		t.Error(err)
+
+	}
+
+	res, err := ondemand.OnDemand(string(ctn))
+	if err != nil {
+
+		t.Error(err)
+
+	}
+
+	t.Log(res)
 }
