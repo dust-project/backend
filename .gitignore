@@ -1,3 +1,4 @@
 pkg/pdf/sample.pdf
 .env
 dust
+.DS_STORE
