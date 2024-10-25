@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -17,23 +18,28 @@ import (
 	"github.com/markbates/goth/providers/github"
 )
 
-func fileServer(r chi.Router, path string, root http.FileSystem) {
-	if strings.ContainsAny(path, "{}*") {
-		panic("FileServer does not permit any URL parameters.")
-	}
+func fileServer(hostpath, fspath string, root http.FileSystem, srv *server.Server) {
 
-	if path != "/" && path[len(path)-1] != '/' {
-		r.Get(path, http.RedirectHandler(path+"/", 301).ServeHTTP)
-		path += "/"
-	}
-	path += "*"
+	fs := http.FileServer(root)
 
-	r.Get(path, func(w http.ResponseWriter, r *http.Request) {
-		rctx := chi.RouteContext(r.Context())
-		pathPrefix := strings.TrimSuffix(rctx.RoutePattern(), "/*")
-		fs := http.StripPrefix(pathPrefix, http.FileServer(root))
+	srv.Mux.Get(hostpath, func(w http.ResponseWriter, r *http.Request) {
+
+		// If the requested file exists then return if; otherwise return index.html (fileserver default page)
+		if r.URL.Path != hostpath {
+			fullPath := fspath + strings.TrimPrefix(path.Clean(r.URL.Path), "/")
+			_, err := os.Stat(fullPath)
+			if err != nil {
+				if !os.IsNotExist(err) {
+					panic(err)
+				}
+				// Requested file does not exist so we return the default (resolves to index.html)
+				r.URL.Path = "/"
+			}
+		}
 		fs.ServeHTTP(w, r)
+
 	})
+
 }
 
 func HandleRoutes(srv *server.Server) {
@@ -60,7 +66,7 @@ func HandleRoutes(srv *server.Server) {
 	gothic.Store = store
 
 	// route handling begins
-	fileServer(srv.Mux, "/", http.Dir(srv.Config.StaticDir))
+	fileServer("/", srv.Config.StaticDir, http.Dir(srv.Config.StaticDir), srv)
 	HandleLoginCallback("/auth/{provider}/callback", srv)
 	HandleLogin("/auth/{provider}", srv)
 	HandleLogout("/auth/{provider}/logout", srv)
