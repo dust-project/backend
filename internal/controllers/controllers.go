@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"dust/internal/server"
+	"dust/pkg/ondemand"
 	"dust/pkg/pdf"
 	"encoding/base64"
 	"encoding/json"
@@ -95,6 +96,7 @@ func HandleRoutes(srv *server.Server) {
 	HandleLogin("/auth/{provider}", srv)
 	HandleLogout("/auth/{provider}/logout", srv)
 	HandleProcess("/api/pdf", srv)
+	HandleProcessPodcast("/api/podcast", srv)
 
 }
 
@@ -267,4 +269,120 @@ func HandleProcess(pattern string, srv *server.Server) {
 		// Return success
 		<-finish
 	})
+}
+
+type UserInput struct {
+	Topics []string `json:"topic"`
+}
+
+func HandleProcessPodcast(pattern string, srv *server.Server) {
+	finish := make(chan struct{})
+
+	srv.Mux.Post(pattern, func(w http.ResponseWriter, r *http.Request) {
+
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			http.Error(w, "Streaming unsupported", http.StatusInternalServerError)
+			return
+		}
+
+		c, _, _ := websocket.DefaultDialer.Dial(fmt.Sprintf("wss://api.hume.ai/v0/evi/chat?api_key=%s", os.Getenv("HUME_KEY")), nil)
+
+		defer r.Body.Close()
+
+		var userInput UserInput
+		json.NewDecoder(r.Body).Decode(&userInput)
+
+		go func(conn *websocket.Conn) {
+
+			w.Header().Set("Content-Type", "audio/wav")
+
+			for {
+
+				var audioOutput AudioOutput
+				mt, message, err := conn.ReadMessage()
+
+				if mt == websocket.CloseMessage || mt == websocket.CloseNormalClosure || mt == websocket.CloseGoingAway {
+
+					finish <- struct{}{}
+					break
+
+				}
+
+				if err != nil {
+					finish <- struct{}{}
+					break
+				}
+
+				if err := json.Unmarshal(message, &audioOutput); err != nil {
+					log.Println(err)
+					finish <- struct{}{}
+					break
+				}
+
+				bts, _ := base64.RawStdEncoding.DecodeString(audioOutput.Data)
+
+				if _, err := w.Write(bts); err != nil {
+					log.Println(err)
+					finish <- struct{}{}
+					break
+
+				}
+
+				flusher.Flush()
+
+			}
+
+		}(c)
+
+		inputstring, err := ondemand.OnDemand(strings.Join(userInput.Topics, ","))
+		if err != nil {
+
+			http.Error(w, "Could not access ondemand rest agent", http.StatusInternalServerError)
+			return
+
+		}
+
+		promptMap := map[string]string{
+
+			"type":          "session_settings",
+			"system_prompt": "You are a podcast generator. Generate a 30 minute podcast about the topics and content.",
+		}
+		inputMap := map[string]string{
+			"type": "user_input",
+			"text": inputstring,
+		}
+
+		prompt, err := json.Marshal(promptMap)
+		if err != nil {
+
+			http.Error(w, "Could not marshal prompt", http.StatusInternalServerError)
+			return
+
+		}
+		input, err := json.Marshal(inputMap)
+		if err != nil {
+
+			http.Error(w, "Could not marshal prompt", http.StatusInternalServerError)
+			return
+
+		}
+
+		if err := c.WriteMessage(websocket.TextMessage, prompt); err != nil {
+
+			http.Error(w, "Could not write message", http.StatusInternalServerError)
+			return
+
+		}
+		if err := c.WriteMessage(websocket.TextMessage, input); err != nil {
+
+			http.Error(w, "Could not write message", http.StatusInternalServerError)
+			return
+
+		}
+
+		// Return success
+		<-finish
+	})
+
 }
