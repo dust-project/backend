@@ -6,6 +6,7 @@ require (
 	github.com/dslipak/pdf v0.0.2
 	github.com/go-chi/chi/v5 v5.1.0
 	github.com/gorilla/sessions v1.2.1
+	github.com/gorilla/websocket v1.5.3
 	github.com/joho/godotenv v1.5.1
 	github.com/markbates/goth v1.80.0
 )

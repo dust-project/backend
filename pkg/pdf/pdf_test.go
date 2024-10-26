@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"dust/pkg/ondemand"
 	"io"
+	"log"
 	"os"
 	"testing"
 )
@@ -53,6 +54,8 @@ func TestReadPdf(t *testing.T) {
 
 	}
 
+	log.Println(string(ctn))
+
 	res, err := ondemand.OnDemand(string(ctn))
 	if err != nil {
 
@@ -60,5 +63,5 @@ func TestReadPdf(t *testing.T) {
 
 	}
 
-	t.Log(res)
+	t.Log("ondemand: ", res)
 }

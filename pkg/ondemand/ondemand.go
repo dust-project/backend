@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"regexp"
 	"strings"
@@ -148,6 +149,7 @@ func submitQuery(apiKey, sessionID, query string) (string, error) {
 	}
 
 	respBody, err := io.ReadAll(resp.Body)
+	log.Println(string(respBody))
 	if err != nil {
 		return "", fmt.Errorf("failed to read response body: %w", err)
 	}
