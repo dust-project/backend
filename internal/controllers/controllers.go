@@ -3,8 +3,10 @@ package controllers
 import (
 	"dust/internal/server"
 	"dust/pkg/pdf"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"github.com/go-chi/cors"
 	"io"
 	"log"
 	"net/http"
@@ -66,6 +68,17 @@ func HandleRoutes(srv *server.Server) {
 		}
 		return "", fmt.Errorf("no provider specified")
 	}
+
+	srv.Mux.Use(cors.Handler(cors.Options{
+		// AllowedOrigins:   []string{"https://foo.com"}, // Use this to allow specific origin hosts
+		AllowedOrigins: []string{"https://*", "http://*"},
+		// AllowOriginFunc:  func(r *http.Request, origin string) bool { return true },
+		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token"},
+		ExposedHeaders:   []string{"Link"},
+		AllowCredentials: false,
+		MaxAge:           300, // Maximum value not ignored by any of major browsers
+	}))
 
 	store := sessions.NewCookieStore([]byte(os.Getenv("GITHUB_SECRET")))
 	store.Options.SameSite = http.SameSiteLaxMode
@@ -132,7 +145,7 @@ func HandleProcess(pattern string, srv *server.Server) {
 	srv.Mux.Post(pattern, func(w http.ResponseWriter, r *http.Request) {
 
 		// Parse the multipart form
-		err := r.ParseMultipartForm(10 << 20) // 10 MB
+		err := r.ParseMultipartForm(20 << 20) // 20 MB
 		if err != nil {
 			http.Error(w, "Could not parse form", http.StatusInternalServerError)
 			return
@@ -172,13 +185,23 @@ func HandleProcess(pattern string, srv *server.Server) {
 
 		go func(conn *websocket.Conn) {
 
+			w.Header().Set("Content-Type", "audio/wav")
+
 			for {
 
 				var audioOutput AudioOutput
-				_, message, err := conn.ReadMessage()
+				mt, message, err := conn.ReadMessage()
+
+				if mt == websocket.CloseMessage || mt == websocket.CloseNormalClosure || mt == websocket.CloseGoingAway {
+
+					finish <- struct{}{}
+					break
+
+				}
+
 				if err != nil {
 					finish <- struct{}{}
-					return
+					break
 				}
 
 				if err := json.Unmarshal(message, &audioOutput); err != nil {
@@ -187,7 +210,9 @@ func HandleProcess(pattern string, srv *server.Server) {
 					break
 				}
 
-				if err := json.NewEncoder(w).Encode(map[string]string{"chunk": audioOutput.Data}); err != nil {
+				bts, _ := base64.RawStdEncoding.DecodeString(audioOutput.Data)
+
+				if _, err := w.Write(bts); err != nil {
 					log.Println(err)
 					finish <- struct{}{}
 					break
@@ -203,7 +228,7 @@ func HandleProcess(pattern string, srv *server.Server) {
 		promptMap := map[string]string{
 
 			"type":          "session_settings",
-			"system_prompt": "Sanitize and format the text as it most likely pdf extracted plaintext",
+			"system_prompt": "Sanitize and format the text as it most likely pdf extracted plaintext. Do not mention this only narrate the text.",
 		}
 		inputMap := map[string]string{
 
@@ -241,7 +266,5 @@ func HandleProcess(pattern string, srv *server.Server) {
 
 		// Return success
 		<-finish
-		w.WriteHeader(http.StatusOK)
-
 	})
 }
